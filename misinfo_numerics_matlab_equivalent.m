@@ -64,7 +64,13 @@ R0_end_2 = spectral_R0(b_end, Lam2, mu2, nu2);
 
 fprintf('2-node  R0(sub)=%.4f  R0(end)=%.4f\n', R0_sub_2, R0_end_2);
 
-[Se, Ie, ier] = endemic_equilibrium(b_end, Lam2, mu2, nu2, al2);
+% Compute the positive endemic equilibrium.  The algebraic system also has
+% the boundary equilibrium E0, so we do not use fsolve here; the monotone
+% fixed-point iteration below selects the positive endemic fixed point when
+% R0 > 1.
+Ie = endemic_I_positive_fixed_point(b_end, Lam2, mu2, nu2, al2);
+Qe = b_end * f_inc(Ie, al2);
+Se = Lam2 ./ (mu2 + Qe);
 fprintf('2-node  S* = [%g  %g]  I* = [%g  %g]\n', Se(1), Se(2), Ie(1), Ie(2));
 
 %% Figure
@@ -118,8 +124,8 @@ contour(b12, b21, R0grid, [1.0, 1.0], 'w', 'LineWidth', 2.0);
 text(0.043, 0.014, '$\mathcal{R}_0=1$', 'Interpreter', 'latex', ...
      'Color', 'w', 'FontSize', 8, 'Rotation', -20);
 cb = colorbar;
-cb.Label.String = '$\mathcal{R}_0$';
-cb.Label.Interpreter = 'latex';
+cb.Label.String = 'R_0';
+cb.Label.Interpreter = 'tex';
 title('(C) $\mathcal{R}_0$ over cross-couplings', 'Interpreter', 'latex', 'FontSize', 10);
 xlabel('$\beta_{12}$', 'Interpreter', 'latex');
 ylabel('$\beta_{21}$', 'Interpreter', 'latex');
@@ -312,47 +318,37 @@ I1s = zeros(size(factors));
 I2s = zeros(size(factors));
 K22 = b_end(2,2) * Lam2(2) / (mu2(2) * nu2(2));
 
-% Use continuation: the equilibrium found at one factor is used as the
-% initial guess for the next one, improving robustness of fsolve/fminsearch.
-eq_guess = [];
-
 for k = 1:length(factors)
     fmul = factors(k);
     nu_new = nu2 .* [fmul; 1.0];
 
     R0s(k) = spectral_R0(b_end, Lam2, mu2, nu_new);
 
-    if isempty(eq_guess)
-        [Sx, Ix, ier] = endemic_equilibrium(b_end, Lam2, mu2, nu_new, al2);
-    else
-        [Sx, Ix, ier] = endemic_equilibrium(b_end, Lam2, mu2, nu_new, al2, eq_guess);
-    end
-
-    Sx = max(Sx, 0);
-    Ix = max(Ix, 0);
-    eq_guess = [max(Sx, 1e-10); max(Ix, 1e-10)];
-
+    % Positive endemic equilibrium, not the boundary equilibrium E0.
+    Ix = endemic_I_positive_fixed_point(b_end, Lam2, mu2, nu_new, al2);
     I1s(k) = Ix(1);
     I2s(k) = Ix(2);
 end
 
 yyaxis left;
 hR0 = plot(factors, R0s, 'Color', CB(3,:), 'LineWidth', 1.6); hold on;
-yline(1, '--', 'Color', 'k', 'LineWidth', 0.8, 'HandleVisibility', 'off');
-yline(K22, ':', 'Color', CB(3,:), 'LineWidth', 0.9, 'HandleVisibility', 'off');
+hOne = yline(1, '--', 'Color', 'k', 'LineWidth', 0.8);
+hK22 = yline(K22, ':', 'Color', CB(3,:), 'LineWidth', 0.9);
 ylabel('$\mathcal{R}_0$', 'Interpreter', 'latex');
-ylim([min(0.95, min(R0s)-0.03), max(R0s)+0.08]);
+ylim([1.0, max(R0s)+0.08]);
 
 yyaxis right;
 hI1 = plot(factors, I1s, 'Color', CB(1,:), 'LineWidth', 1.2); hold on;
 hI2 = plot(factors, I2s, 'Color', CB(2,:), 'LineWidth', 1.2);
 ylabel('endemic $I_i^*$', 'Interpreter', 'latex');
+ylim([0, max([I1s(:); I2s(:)])*1.12]);
 
 xlabel('factor multiplying $\nu_1$', 'Interpreter', 'latex');
 title('(I) Raising $\nu_1$: $\mathcal{R}_0$ decreases, no eradication ($\mathcal{K}_{22}>1$)', ...
       'Interpreter', 'latex', 'FontSize', 8.5);
-legend([hR0, hI1, hI2], {'$\mathcal{R}_0$', '$I_1^*$', '$I_2^*$'}, ...
-       'Interpreter', 'latex', 'FontSize', 7, 'Location', 'east');
+legend([hR0, hOne, hK22, hI1, hI2], ...
+       {'$\mathcal{R}_0$', '$\mathcal{R}_0=1$', '$\mathcal{K}_{22}=1.125$', '$I_1^*$', '$I_2^*$'}, ...
+       'Interpreter', 'latex', 'FontSize', 6.5, 'Location', 'east');
 grid on;
 
 %% Overall title and save
@@ -383,30 +379,52 @@ function R0 = spectral_R0(beta, Lam, mu, nu)
 end
 
 function [Sstar, Istar, ier] = endemic_equilibrium(beta, Lam, mu, nu, alpha, guess)
+    %#ok<INUSD>
+    % Robust equilibrium selector.
+    % If R0 <= 1, the only biologically relevant equilibrium is E0.
+    % If R0 > 1, the algebraic equations also admit E0, so a generic solver
+    % may converge to the boundary.  We therefore compute the positive
+    % endemic equilibrium by monotone fixed-point iteration in I.
+    R0 = spectral_R0(beta, Lam, mu, nu);
+
+    if R0 <= 1
+        Istar = zeros(length(Lam), 1);
+        Sstar = Lam ./ mu;
+        ier = true;
+        return;
+    end
+
+    Istar = endemic_I_positive_fixed_point(beta, Lam, mu, nu, alpha);
+    Q = beta * f_inc(Istar, alpha);
+    Sstar = Lam ./ (mu + Q);
+    ier = all(Istar > 0) && all(isfinite(Istar)) && all(isfinite(Sstar));
+end
+
+function Istar = endemic_I_positive_fixed_point(beta, Lam, mu, nu, alpha)
+    % Computes the positive endemic fixed point of
+    %   I_i = Lambda_i Q_i(I)/(nu_i (mu_i + Q_i(I))),
+    % where Q_i(I)=sum_j beta_ij f_j(I_j).
+    % Starting from the positive upper vector Lam./nu avoids convergence to
+    % the boundary equilibrium I=0 in the supercritical case R0>1.
     n = length(Lam);
+    Iold = Lam ./ nu;
+    tol = 1e-12;
+    maxIter = 100000;
 
-    if nargin < 6 || isempty(guess)
-        guess = [0.9 * Lam ./ mu; 0.3 * ones(n,1)];
+    for it = 1:maxIter
+        Q = beta * f_inc(Iold, alpha);
+        Inew = Lam .* Q ./ (nu .* (mu + Q));
+
+        if max(abs(Inew - Iold)) < tol
+            Istar = max(Inew, 0);
+            return;
+        end
+
+        % Damping improves robustness for near-threshold cases.
+        Iold = 0.5 * Iold + 0.5 * Inew;
     end
 
-    % If Optimization Toolbox is available, use fsolve. Otherwise use fminsearch
-    % on log-variables, which keeps S and I positive.
-    if exist('fsolve', 'file') == 2
-        opts = optimset('Display', 'off', 'TolX', 1e-12, 'TolFun', 1e-12);
-        [sol, ~, exitflag] = fsolve(@(v) endemic_residual(v, beta, Lam, mu, nu, alpha), guess, opts);
-        ier = exitflag > 0;
-    else
-        x0 = log(max(guess, 1e-10));
-        opts = optimset('Display', 'off', 'TolX', 1e-12, 'TolFun', 1e-12, ...
-                        'MaxIter', 5000, 'MaxFunEvals', 50000);
-        obj = @(x) sum(endemic_residual(exp(x), beta, Lam, mu, nu, alpha).^2);
-        [xsol, fval, exitflag] = fminsearch(obj, x0, opts);
-        sol = exp(xsol);
-        ier = (exitflag > 0) && (fval < 1e-8);
-    end
-
-    Sstar = sol(1:n);
-    Istar = sol(n+1:2*n);
+    Istar = max(Iold, 0);
 end
 
 function F = endemic_residual(v, beta, Lam, mu, nu, alpha)
