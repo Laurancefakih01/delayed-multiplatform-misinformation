@@ -302,40 +302,57 @@ xlabel('$\Delta\mathcal{R}_0$', 'Interpreter', 'latex');
 legend({'+20\%', '-20\%'}, 'Interpreter', 'latex', 'FontSize', 7, 'Location', 'northeast');
 grid on;
 
-%% Panel I: moderation intervention
+%% Panel I: moderation intervention on platform 1 only
+% Increasing only nu_1 lowers R0 and I_1^*, but it cannot eradicate
+% misinformation in this parameter set because K_22 = 1.125 > 1.
 nexttile;
-factors = linspace(1.0, 3.0, 25);
+factors = linspace(1.0, 5.0, 35);
 R0s = zeros(size(factors));
 I1s = zeros(size(factors));
 I2s = zeros(size(factors));
+K22 = b_end(2,2) * Lam2(2) / (mu2(2) * nu2(2));
+
+% Use continuation: the equilibrium found at one factor is used as the
+% initial guess for the next one, improving robustness of fsolve/fminsearch.
+eq_guess = [];
 
 for k = 1:length(factors)
     fmul = factors(k);
     nu_new = nu2 .* [fmul; 1.0];
 
     R0s(k) = spectral_R0(b_end, Lam2, mu2, nu_new);
-    [Sx, Ix, ier] = endemic_equilibrium(b_end, Lam2, mu2, nu_new, al2);
+
+    if isempty(eq_guess)
+        [Sx, Ix, ier] = endemic_equilibrium(b_end, Lam2, mu2, nu_new, al2);
+    else
+        [Sx, Ix, ier] = endemic_equilibrium(b_end, Lam2, mu2, nu_new, al2, eq_guess);
+    end
+
+    Sx = max(Sx, 0);
     Ix = max(Ix, 0);
+    eq_guess = [max(Sx, 1e-10); max(Ix, 1e-10)];
 
     I1s(k) = Ix(1);
     I2s(k) = Ix(2);
 end
 
 yyaxis left;
-plot(factors, R0s, 'Color', CB(3,:), 'LineWidth', 1.6); hold on;
-yline(1, '--', 'Color', 'k', 'LineWidth', 0.8);
+hR0 = plot(factors, R0s, 'Color', CB(3,:), 'LineWidth', 1.6); hold on;
+yline(1, '--', 'Color', 'k', 'LineWidth', 0.8, 'HandleVisibility', 'off');
+yline(K22, ':', 'Color', CB(3,:), 'LineWidth', 0.9, 'HandleVisibility', 'off');
 ylabel('$\mathcal{R}_0$', 'Interpreter', 'latex');
+ylim([min(0.95, min(R0s)-0.03), max(R0s)+0.08]);
 
 yyaxis right;
-plot(factors, I1s, 'Color', CB(1,:), 'LineWidth', 1.2); hold on;
-plot(factors, I2s, 'Color', CB(2,:), 'LineWidth', 1.2);
+hI1 = plot(factors, I1s, 'Color', CB(1,:), 'LineWidth', 1.2); hold on;
+hI2 = plot(factors, I2s, 'Color', CB(2,:), 'LineWidth', 1.2);
 ylabel('endemic $I_i^*$', 'Interpreter', 'latex');
 
-xlabel('moderation factor on $\nu_1$', 'Interpreter', 'latex');
-title('(I) Moderation: raise $\nu_1\Rightarrow\mathcal{R}_0\downarrow1$, $I^*\to0$', ...
-      'Interpreter', 'latex', 'FontSize', 9);
-legend({'$\mathcal{R}_0$', '$I_1^*$', '$I_2^*$'}, 'Interpreter', 'latex', ...
-       'FontSize', 7, 'Location', 'east');
+xlabel('factor multiplying $\nu_1$', 'Interpreter', 'latex');
+title('(I) Raising $\nu_1$: $\mathcal{R}_0$ decreases, no eradication ($\mathcal{K}_{22}>1$)', ...
+      'Interpreter', 'latex', 'FontSize', 8.5);
+legend([hR0, hI1, hI2], {'$\mathcal{R}_0$', '$I_1^*$', '$I_2^*$'}, ...
+       'Interpreter', 'latex', 'FontSize', 7, 'Location', 'east');
 grid on;
 
 %% Overall title and save
