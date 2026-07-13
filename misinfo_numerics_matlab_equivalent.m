@@ -1,21 +1,5 @@
 % misinfo_numerics_matlab_equivalent.m
-%
-% MATLAB equivalent of the Python script misinfo_numerics.py.
-% It generates the enriched 3-by-3 numerical study for the delayed
-% multi-platform misinformation model with saturated incidence.
-%
-% The figure is saved automatically in:
-%   ~/Documents/FakeNews_DDE_Matlab/misinfo_enriched.png
-%
-% No empirical data are used.
-% The code uses fixed-step method-of-steps RK4 with linear interpolation
-% of the stored history buffer, matching the Python implementation.
-%
-% NOTE:
-% The n=20 random network data are hard-coded below from NumPy seed 7,
-% because MATLAB and NumPy do not generate the same random numbers from
-% the same seed. This makes the MATLAB script reproduce the same network
-% instance used by the Python script.
+
 
 clear; clc; close all;
 
@@ -71,12 +55,20 @@ fprintf('2-node  R0(sub)=%.4f  R0(end)=%.4f\n', R0_sub_2, R0_end_2);
 Ie = endemic_I_positive_fixed_point(b_end, Lam2, mu2, nu2, al2);
 Qe = b_end * f_inc(Ie, al2);
 Se = Lam2 ./ (mu2 + Qe);
+
+tl = tiledlayout(3, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 fprintf('2-node  S* = [%g  %g]  I* = [%g  %g]\n', Se(1), Se(2), Ie(1), Ie(2));
+
+%% --- Step-halving numerical refinement check ---
+[t1, ~, I1] = integrate_dde(b_end, Lam2, mu2, nu2, al2, tau2, 120, 0.02, [], [2.0; 0.05]);
+[t2, ~, I2] = integrate_dde(b_end, Lam2, mu2, nu2, al2, tau2, 120, 0.01, [], [2.0; 0.05]);
+I2i = interp1(t2, I2, t1);
+eps_num = max(abs(I1(:) - I2i(:)));
+fprintf('max trajectory difference (dt=0.02 vs 0.01) = %.3e\n', eps_num);
+%% ---------------------------------------------------------------
 
 %% Figure
 fig = figure('Color', 'w', 'Units', 'inches', 'Position', [0.5 0.5 13 9.5]);
-tl = tiledlayout(3, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
-
 %% Panel A: sub-threshold
 nexttile;
 [t, S, I] = integrate_dde(b_sub, Lam2, mu2, nu2, al2, tau2, 60, 0.02, [], [2.0; 2.0]);
@@ -262,7 +254,7 @@ grid on;
 
 %% Panel G: delay sweep at fixed beta
 nexttile;
-delay_scales = [0.0, 1.0, 2.0, 3.5];
+delay_scales = [0.25, 1.0, 2.0, 3.5];
 for c = 1:length(delay_scales)
     scale = delay_scales(c);
     [t, S, I] = integrate_dde(b_end, Lam2, mu2, nu2, al2, scale*tau2, 160, 0.02, [], [3.0; 0.02]);
@@ -273,7 +265,7 @@ title('(G) Vary delays at fixed $\beta$: same $E^*$, slower/overshoot', ...
       'Interpreter', 'latex', 'FontSize', 9);
 xlabel('t');
 ylabel('$I_1$', 'Interpreter', 'latex');
-legend({'$\tau\times0.0$', '$\tau\times1.0$', '$\tau\times2.0$', '$\tau\times3.5$'}, ...
+legend({'$\tau\times0.25$', '$\tau\times1.0$', '$\tau\times2.0$', '$\tau\times3.5$'}, ...
        'Interpreter', 'latex', 'FontSize', 7, 'Location', 'northeast');
 grid on;
 
@@ -379,7 +371,7 @@ function R0 = spectral_R0(beta, Lam, mu, nu)
 end
 
 function [Sstar, Istar, ier] = endemic_equilibrium(beta, Lam, mu, nu, alpha, guess)
-    %#ok<INUSD>
+    
     % Robust equilibrium selector.
     % If R0 <= 1, the only biologically relevant equilibrium is E0.
     % If R0 > 1, the algebraic equations also admit E0, so a generic solver
